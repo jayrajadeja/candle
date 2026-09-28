@@ -52,7 +52,7 @@ func Aggregate(ticks []tick.Tick, width int64) ([]Candle, error) {
 		out = append(out, cur)
 	}
 	for _, tk := range ticks {
-		b := tk.TS / width
+		b := tk.TS / width // TS assumed non-negative (logical counter); / truncates toward zero
 		if !open || b != bucket {
 			flush()
 			bucket = b
