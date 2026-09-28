@@ -14,7 +14,7 @@ type fakeSource struct {
 	candles []candle.Candle
 	err     error
 	// captured args of the last call
-	gotSymbol             string
+	gotSymbol                string
 	gotWidth, gotFrom, gotTo int64
 }
 
