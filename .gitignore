@@ -1,4 +1,5 @@
-/candle
-/candle.exe
-/*.log
+# Built binaries (kept out; e2e builds to a temp dir).
+/candle-bin
+/cmd/candle/candle
+*.log
 /tmp/
