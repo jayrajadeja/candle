@@ -12,9 +12,9 @@ import (
 )
 
 // writeLog writes a tickstore-format .log (8-byte header + 25-byte records) for
-// symbol under dir.
-func writeLog(t *testing.T, dir, symbol string, ticks []tick.Tick) {
-	t.Helper()
+// symbol under dir. It accepts testing.TB so tests and benchmarks can share it.
+func writeLog(tb testing.TB, dir, symbol string, ticks []tick.Tick) {
+	tb.Helper()
 	var buf []byte
 	var h [tick.HeaderSize]byte
 	copy(h[0:6], []byte("TCKLOG"))
@@ -29,7 +29,7 @@ func writeLog(t *testing.T, dir, symbol string, ticks []tick.Tick) {
 		buf = append(buf, b[:]...)
 	}
 	if err := os.WriteFile(filepath.Join(dir, symbol+".log"), buf, 0o644); err != nil {
-		t.Fatalf("writeLog: %v", err)
+		tb.Fatalf("writeLog: %v", err)
 	}
 }
 
