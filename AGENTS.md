@@ -33,7 +33,11 @@ passes.** Show the output; don't assert.
   record layout in isolation.
 - **I/O is isolated.** `tick` and `candle` are pure (return errors, no `os.Exit`/
   print/panic). Only `cmd/candle` touches files/stdin/stdout/argv, and it uses a
-  testable `run(args, stdin, stdout, stderr) int` seam.
+  testable `run(args, stdin, stdout, stderr) int` seam. `serve` follows the same
+  rule: `server` is transport-only over a `candle.Source`, `logsource` does the I/O.
+- **Serve stays decoupled from tickstore.** `candle serve` reads `.log` files
+  directly through `feed`; it must not import `tickstore`'s store/index. The only
+  shared contract is the 25-byte record.
 - **Determinism.** Same input ⇒ byte-identical output (table and CSV).
 - **Minimal, surgical diffs.** Keep every safety guard; write the failing test first.
 
@@ -52,4 +56,7 @@ passes.** Show the output; don't assert.
 |---------|-----|
 | `tick/`   | the 25-byte record + `Decode` (pure) |
 | `candle/` | `Aggregate` — ticks → OHLCV+VWAP+buy/sell candles (pure) |
-| `cmd/candle/` | table/CSV rendering + file/stdin plumbing — the only I/O layer |
+| `feed/`   | frame a 25-byte record stream (or a `.log` with header) into ticks |
+| `logsource/` | read `dir/SYMBOL.log`, TS-filter, aggregate — the `serve` data source |
+| `server/` | transport-only HTTP/JSON handler over a `candle.Source` |
+| `cmd/candle/` | table/CSV rendering, `serve` subcommand, file/stdin plumbing — the I/O layer |

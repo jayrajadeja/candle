@@ -12,6 +12,12 @@ import (
 // ErrBadWidth is returned when the bucket width is not positive.
 var ErrBadWidth = errors.New("candle: width must be positive")
 
+// Source is a transport-agnostic producer of candles for one symbol over a
+// logical-time window, letting an HTTP server hold any candle backend.
+type Source interface {
+	Candles(symbol string, width, from, to int64) ([]Candle, error)
+}
+
 // Candle is one aggregated bar. Start is the bucket's logical-time start
 // (bucketIndex * width). Prices are in integer ticks; VWAP is integer
 // (volume-weighted mean price, floored).
