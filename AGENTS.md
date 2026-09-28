@@ -38,6 +38,10 @@ passes.** Show the output; don't assert.
 - **Serve stays decoupled from tickstore.** `candle serve` reads `.log` files
   directly through `feed`; it must not import `tickstore`'s store/index. The only
   shared contract is the 25-byte record.
+- **The serve cache slice is immutable on the read path.** `logsource.Cache` shares
+  one parsed tick slice across concurrent readers under an `RWMutex`; filter it into
+  a *fresh* slice, never in place (`ticks[:0]`). Only the stateless `LogSource`, whose
+  slice is freshly read per request, may filter in place.
 - **Determinism.** Same input ⇒ byte-identical output (table and CSV).
 - **Minimal, surgical diffs.** Keep every safety guard; write the failing test first.
 
@@ -57,6 +61,6 @@ passes.** Show the output; don't assert.
 | `tick/`   | the 25-byte record + `Decode` (pure) |
 | `candle/` | `Aggregate` — ticks → OHLCV+VWAP+buy/sell candles (pure) |
 | `feed/`   | frame a 25-byte record stream (or a `.log` with header) into ticks |
-| `logsource/` | read `dir/SYMBOL.log`, TS-filter, aggregate — the `serve` data source |
+| `logsource/` | read `dir/SYMBOL.log`, TS-filter, aggregate — `LogSource` (stateless) and `Cache` (`NewCached`, resident + `Stat`-validated), the `serve` data source |
 | `server/` | transport-only HTTP/JSON handler over a `candle.Source` |
 | `cmd/candle/` | table/CSV rendering, `serve` subcommand, file/stdin plumbing — the I/O layer |
