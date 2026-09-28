@@ -17,7 +17,11 @@ import (
 )
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+	args := os.Args[1:]
+	if len(args) > 0 && args[0] == "serve" {
+		os.Exit(runServeCmd(args[1:], os.Stderr))
+	}
+	os.Exit(run(args, os.Stdin, os.Stdout, os.Stderr))
 }
 
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
