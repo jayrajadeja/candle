@@ -6,8 +6,6 @@
 package main
 
 import (
-	"bufio"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -15,7 +13,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/jayrajadeja/candle/candle"
-	"github.com/jayrajadeja/candle/tick"
+	"github.com/jayrajadeja/candle/feed"
 )
 
 func main() {
@@ -43,7 +41,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	defer closeFn()
 
-	ticks, err := readTicks(src, *logMode)
+	ticks, err := feed.ReadTicks(src, *logMode)
 	if err != nil {
 		fmt.Fprintf(stderr, "candle: %v\n", err)
 		return 1
@@ -73,40 +71,6 @@ func openSource(path string, stdin io.Reader) (io.Reader, func(), error) {
 		return nil, nil, err
 	}
 	return f, func() { f.Close() }, nil
-}
-
-// readTicks frames the input into 25-byte records. In log mode it first strips
-// and validates the 8-byte tickstore header. A trailing partial record is an error.
-func readTicks(r io.Reader, logMode bool) ([]tick.Tick, error) {
-	br := bufio.NewReader(r)
-	if logMode {
-		var h [tick.HeaderSize]byte
-		if _, err := io.ReadFull(br, h[:]); err != nil {
-			return nil, fmt.Errorf("reading log header: %w", err)
-		}
-		if err := tick.ValidateHeader(h[:]); err != nil {
-			return nil, err
-		}
-	}
-	out := make([]tick.Tick, 0)
-	var buf [tick.RecordSize]byte
-	for {
-		_, err := io.ReadFull(br, buf[:])
-		if errors.Is(err, io.EOF) {
-			return out, nil
-		}
-		if errors.Is(err, io.ErrUnexpectedEOF) {
-			return nil, errors.New("truncated stream: trailing partial record")
-		}
-		if err != nil {
-			return nil, err
-		}
-		tk, err := tick.Decode(buf[:])
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, tk)
-	}
 }
 
 func renderCSV(w io.Writer, candles []candle.Candle) {
