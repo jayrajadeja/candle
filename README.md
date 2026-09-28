@@ -36,6 +36,9 @@ candle --width 20 --log data/SYNTH.log
 
 # CSV instead of a table
 lob-replay --emit | candle --width 20 --csv
+
+# serve: read-only HTTP/JSON candles over a directory of .log files
+candle serve --dir data --addr 127.0.0.1:8138
 ```
 
 Flags:
@@ -48,6 +51,45 @@ Flags:
 
 Input is read from the file named as the first positional argument, or from stdin
 when none is given.
+
+## Serve (HTTP)
+
+`candle serve` exposes the same aggregation read-only over HTTP/JSON, reading
+`tickstore` `.log` files directly from a directory (one `SYMBOL.log` per symbol).
+It shares nothing with `tickstore` but the 25-byte record: no store or index
+dependency, just a per-request scan of the log.
+
+```bash
+candle serve --dir data --addr 127.0.0.1:8138
+curl 'localhost:8138/v1/candles?symbol=SYNTH&width=250&from=0&to=1000'
+```
+
+Serve flags:
+
+| flag | default | meaning |
+|------|---------|---------|
+| `--dir` | `data` | directory holding `SYMBOL.log` files |
+| `--addr` | `127.0.0.1:8138` | listen address |
+
+Endpoints:
+
+| method | path | meaning |
+|--------|------|---------|
+| `GET` | `/healthz` | liveness — plain `ok` |
+| `GET` | `/v1/candles?symbol=&width=&from=&to=` | OHLCV candles as JSON |
+
+`symbol` and `width` (> 0) are required; `from`/`to` are inclusive logical-TS bounds
+and default to the full range. An unknown symbol returns an empty `candles` array.
+
+**Parity invariant.** For any window, the HTTP result equals the CLI pipe over the
+same ticks:
+
+```
+GET /v1/candles?symbol=X&width=W&from=F&to=T
+  ==  ticks of X.log with F <= TS <= T  |  candle --width W
+```
+
+With no `from`/`to`, that is exactly `candle --width W --log X.log`.
 
 ## How it works
 
@@ -69,9 +111,10 @@ when none is given.
 |---------|-----|
 | `tick/`   | the 25-byte record + `Decode` (pure) |
 | `candle/` | `Aggregate` — ticks → OHLCV+VWAP+buy/sell candles (pure) |
-| `cmd/candle/` | table/CSV rendering + file/stdin plumbing — the only I/O layer |
-
-## Development
+| `feed/`   | frame a 25-byte record stream (or a `.log` with header) into ticks |
+| `logsource/` | read `dir/SYMBOL.log`, TS-filter, aggregate — the `serve` data source |
+| `server/` | transport-only HTTP/JSON handler over a `candle.Source` |
+| `cmd/candle/` | table/CSV rendering, `serve` subcommand, file/stdin plumbing — the I/O layer |
 
 ```bash
 go build ./... && go vet ./... && go test ./...
