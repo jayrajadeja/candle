@@ -49,6 +49,12 @@ passes.** Show the output; don't assert.
   windows from a resumable `candle.Aggregator`; `LogSource` is the test oracle. Any
   non-aligned window falls back to filter-then-`Aggregate`, and any non-append change
   rebuilds — never trade correctness for the fast path.
+- **`/v1/stream` is a diff-the-maintained-series SSE loop.** Each poll fetches the
+  full-range candles and emits only the changed suffix (append-only ⇒ the updated open
+  bucket plus new buckets). The streaming invariant: a client upserting events by
+  `start` equals `GET /v1/candles` full-range. A rebuild (shrink/replace) emits
+  `event: reset` so the client re-snapshots. Keep the loop bounded by `r.Context()`
+  and flush every write.
 - **Determinism.** Same input ⇒ byte-identical output (table and CSV).
 - **Minimal, surgical diffs.** Keep every safety guard; write the failing test first.
 
@@ -69,5 +75,5 @@ passes.** Show the output; don't assert.
 | `candle/` | `Aggregate` + resumable `Aggregator` — ticks → OHLCV+VWAP+buy/sell candles (pure) |
 | `feed/`   | frame a 25-byte record stream (or a `.log` with header) into ticks |
 | `logsource/` | read `dir/SYMBOL.log`, TS-filter, aggregate — `LogSource` (stateless), `Cache` (resident, full re-read), `IncrementalCache` (`NewIncremental`, resident + delta read + maintained candles), the `serve` data source |
-| `server/` | transport-only HTTP/JSON handler over a `candle.Source` |
+| `server/` | transport-only HTTP/JSON handler over a `candle.Source`; `/v1/candles` (read) + `/v1/stream` (SSE live tail) |
 | `cmd/candle/` | table/CSV rendering, `serve` subcommand, file/stdin plumbing — the I/O layer |

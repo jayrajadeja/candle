@@ -45,15 +45,20 @@ type errorResponse struct {
 	Error string `json:"error"`
 }
 
+// candleToDTO maps one candle to its wire DTO.
+func candleToDTO(c candle.Candle) candleDTO {
+	return candleDTO{
+		Start: c.Start, Open: c.Open, High: c.High, Low: c.Low, Close: c.Close,
+		Volume: c.Volume, VWAP: c.VWAP, Trades: c.Trades, BuyVol: c.BuyVol, SellVol: c.SellVol,
+	}
+}
+
 // toDTOs maps candles to wire DTOs, always returning a non-nil slice so the JSON
 // is an empty array `[]` rather than `null`.
 func toDTOs(cs []candle.Candle) []candleDTO {
 	out := make([]candleDTO, 0, len(cs))
 	for _, c := range cs {
-		out = append(out, candleDTO{
-			Start: c.Start, Open: c.Open, High: c.High, Low: c.Low, Close: c.Close,
-			Volume: c.Volume, VWAP: c.VWAP, Trades: c.Trades, BuyVol: c.BuyVol, SellVol: c.SellVol,
-		})
+		out = append(out, candleToDTO(c))
 	}
 	return out
 }
@@ -71,6 +76,7 @@ func Handler(src candle.Source) http.Handler {
 	mux.HandleFunc("/v1/candles", func(w http.ResponseWriter, r *http.Request) {
 		handleCandles(w, r, src)
 	})
+	mux.Handle("/v1/stream", newStreamHandler(src, defaultStreamInterval))
 	// Catch-all: any other path is a JSON 404.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "not found")
