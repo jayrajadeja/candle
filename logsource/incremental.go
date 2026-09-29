@@ -169,18 +169,21 @@ func (c *IncrementalCache) refresh(symbol, path string) (*incHot, error) {
 			for _, a := range h.aggs {
 				a.Add(delta)
 			}
-			h.size, h.modUnix = size, modUnix
+			// Anchor size to the bytes actually framed, not the pre-read Stat: a
+			// writer may append between Stat and read, and the next delta must seek to
+			// exactly where framing stopped or it would re-read (and duplicate) records.
+			h.size, h.modUnix = framedSize(len(h.ticks)), modUnix
 			return h, nil
 		}
 		// Not a clean append -> fall through to a full rebuild.
 	}
-	return c.rebuild(symbol, path, size, modUnix)
+	return c.rebuild(symbol, path, modUnix)
 }
 
 // rebuild reads and frames the whole log, replacing symbol's resident state with a
 // fresh entry (no aggregators yet; they are built lazily per width). The caller holds
 // the write lock.
-func (c *IncrementalCache) rebuild(symbol, path string, size, modUnix int64) (*incHot, error) {
+func (c *IncrementalCache) rebuild(symbol, path string, modUnix int64) (*incHot, error) {
 	ticks, err := readAll(path)
 	if err != nil {
 		return nil, err
@@ -188,11 +191,17 @@ func (c *IncrementalCache) rebuild(symbol, path string, size, modUnix int64) (*i
 	h := &incHot{
 		ticks:   ticks,
 		aggs:    make(map[int64]*candle.Aggregator),
-		size:    size,
+		size:    framedSize(len(ticks)),
 		modUnix: modUnix,
 	}
 	c.m[symbol] = h
 	return h, nil
+}
+
+// framedSize is the byte offset just past n framed records: the 8-byte header plus n
+// fixed-width records. It is the seek offset for the next delta read.
+func framedSize(n int) int64 {
+	return tick.HeaderSize + int64(n)*tick.RecordSize
 }
 
 // incFresh reports whether the log at path is unchanged from the cached entry (same

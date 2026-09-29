@@ -180,3 +180,46 @@ func TestIncrementalConcurrentReadsMatchLogSource(t *testing.T) {
 		t.Fatalf("concurrent: %v", err)
 	}
 }
+
+// A writer appending while readers query must not corrupt the delta offset: after the
+// writes settle, the resident state must still match a cold LogSource over the file
+// (no duplicated or dropped boundary records).
+func TestIncrementalConcurrentAppendAndRead(t *testing.T) {
+	dir := t.TempDir()
+	all := seedTicks(20000)
+	writeLog(t, dir, "SYNTH", all[:1000])
+	c := NewIncremental(dir)
+	incParity(t, c, dir, "SYNTH", 20, minInt64, maxInt64) // prime the width aggregator
+
+	var wg sync.WaitGroup
+	done := make(chan struct{})
+	// Readers hammer the growing log; they must never error.
+	for g := 0; g < 8; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-done:
+					return
+				default:
+					if _, err := c.Candles("SYNTH", 20, minInt64, maxInt64); err != nil {
+						t.Errorf("reader: %v", err)
+						return
+					}
+				}
+			}
+		}()
+	}
+	// One writer appends in batches (the tickstore append-only contract).
+	next := 1000
+	for next < len(all) {
+		appendRecords(t, dir, "SYNTH", all[next:next+250])
+		next += 250
+	}
+	close(done)
+	wg.Wait()
+	// Final state must equal a cold read of the fully-grown file.
+	incParity(t, c, dir, "SYNTH", 20, minInt64, maxInt64)
+	incParity(t, c, dir, "SYNTH", 1, minInt64, maxInt64)
+}
