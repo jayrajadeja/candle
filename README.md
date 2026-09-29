@@ -81,11 +81,14 @@ Endpoints:
 `symbol` and `width` (> 0) are required; `from`/`to` are inclusive logical-TS bounds
 and default to the full range. An unknown symbol returns an empty `candles` array.
 
-`serve` keeps each symbol's parsed ticks hot in a resident, read-only cache, so
-repeat requests skip the open + full read + record framing and pay only the window
-filter and aggregation (about 10x faster on a warm log in the package benchmark). The
-cache is validated per request by a cheap `Stat`: if the `.log` grew, shrank, or was
-replaced, its ticks are reloaded before serving, so results always match the file.
+`serve` keeps each symbol's parsed ticks hot in a resident, read-only source and
+aggregates *incrementally*: on append it reads only the new bytes past the old file
+size (not the whole log), folds them into a resumable per-width aggregator, and
+answers a full-range or bucket-aligned query straight from the maintained candles —
+no re-read, no re-aggregation. In the package benchmark a repeated full-range query
+over a 200k-tick log drops from ~760µs to ~8µs (about 90x) with ~65x fewer bytes
+allocated. Growth is validated per request by a cheap `Stat`; a shrink, replacement,
+or non-append seam triggers a full rebuild, so results always match the file.
 
 **Parity invariant.** For any window, the HTTP result equals the CLI pipe over the
 same ticks:
@@ -116,9 +119,9 @@ With no `from`/`to`, that is exactly `candle --width W --log X.log`.
 | package | job |
 |---------|-----|
 | `tick/`   | the 25-byte record + `Decode` (pure) |
-| `candle/` | `Aggregate` — ticks → OHLCV+VWAP+buy/sell candles (pure) |
+| `candle/` | `Aggregate` and the resumable `Aggregator` — ticks → OHLCV+VWAP+buy/sell candles (pure) |
 | `feed/`   | frame a 25-byte record stream (or a `.log` with header) into ticks |
-| `logsource/` | read `dir/SYMBOL.log`, TS-filter, aggregate — `LogSource` (stateless) and `Cache` (`NewCached`, resident + `Stat`-validated), the `serve` data source |
+| `logsource/` | read `dir/SYMBOL.log`, TS-filter, aggregate — `LogSource` (stateless), `Cache` (resident, full re-read), and `IncrementalCache` (`NewIncremental`, resident + delta read + maintained candles), the `serve` data source |
 | `server/` | transport-only HTTP/JSON handler over a `candle.Source` |
 | `cmd/candle/` | table/CSV rendering, `serve` subcommand, file/stdin plumbing — the I/O layer |
 

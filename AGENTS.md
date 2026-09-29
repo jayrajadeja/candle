@@ -38,10 +38,17 @@ passes.** Show the output; don't assert.
 - **Serve stays decoupled from tickstore.** `candle serve` reads `.log` files
   directly through `feed`; it must not import `tickstore`'s store/index. The only
   shared contract is the 25-byte record.
-- **The serve cache slice is immutable on the read path.** `logsource.Cache` shares
-  one parsed tick slice across concurrent readers under an `RWMutex`; filter it into
-  a *fresh* slice, never in place (`ticks[:0]`). Only the stateless `LogSource`, whose
-  slice is freshly read per request, may filter in place.
+- **The serve cache slice is immutable on the read path.** `logsource.Cache` and
+  `IncrementalCache` share one parsed tick slice across concurrent readers under an
+  `RWMutex`; filter it into a *fresh* slice, never in place (`ticks[:0]`), and note
+  `Aggregator.Candles()` returns a fresh slice so a snapshot can escape the lock. Only
+  the stateless `LogSource`, whose slice is freshly read per request, may filter in
+  place.
+- **Serve is incremental, but results stay byte-identical to `LogSource`.**
+  `IncrementalCache` reads only appended bytes on growth and serves full/aligned
+  windows from a resumable `candle.Aggregator`; `LogSource` is the test oracle. Any
+  non-aligned window falls back to filter-then-`Aggregate`, and any non-append change
+  rebuilds — never trade correctness for the fast path.
 - **Determinism.** Same input ⇒ byte-identical output (table and CSV).
 - **Minimal, surgical diffs.** Keep every safety guard; write the failing test first.
 
@@ -59,8 +66,8 @@ passes.** Show the output; don't assert.
 | package | job |
 |---------|-----|
 | `tick/`   | the 25-byte record + `Decode` (pure) |
-| `candle/` | `Aggregate` — ticks → OHLCV+VWAP+buy/sell candles (pure) |
+| `candle/` | `Aggregate` + resumable `Aggregator` — ticks → OHLCV+VWAP+buy/sell candles (pure) |
 | `feed/`   | frame a 25-byte record stream (or a `.log` with header) into ticks |
-| `logsource/` | read `dir/SYMBOL.log`, TS-filter, aggregate — `LogSource` (stateless) and `Cache` (`NewCached`, resident + `Stat`-validated), the `serve` data source |
+| `logsource/` | read `dir/SYMBOL.log`, TS-filter, aggregate — `LogSource` (stateless), `Cache` (resident, full re-read), `IncrementalCache` (`NewIncremental`, resident + delta read + maintained candles), the `serve` data source |
 | `server/` | transport-only HTTP/JSON handler over a `candle.Source` |
 | `cmd/candle/` | table/CSV rendering, `serve` subcommand, file/stdin plumbing — the I/O layer |
