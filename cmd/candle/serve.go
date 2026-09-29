@@ -43,7 +43,7 @@ func runServe(dir, addr string, ctx context.Context, ready chan<- string) error 
 	if err != nil {
 		return err
 	}
-	srv := &http.Server{Handler: server.Handler(logsource.NewCached(dir))}
+	srv := &http.Server{Handler: server.Handler(logsource.NewIncremental(dir))}
 	if ready != nil {
 		ready <- ln.Addr().String()
 	}
