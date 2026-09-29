@@ -72,12 +72,23 @@ func (s *streamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 			return
 		}
-		if d := firstDiff(last, cs); d < len(cs) {
-			for _, c := range cs[d:] {
+		switch {
+		case !continues(last, cs):
+			// The series was rebuilt (shrank or its bucket boundaries changed), so a
+			// suffix diff would strand now-absent candles in the client. Tell it to
+			// clear and re-snapshot from the events that follow.
+			writeEvent(w, "reset", resetEvent{Reset: true})
+			for _, c := range cs {
 				writeEvent(w, "candle", candleToDTO(c))
 			}
-		} else {
-			io.WriteString(w, ": ping\n\n") // heartbeat keeps idle connections open
+		default:
+			if d := firstDiff(last, cs); d < len(cs) {
+				for _, c := range cs[d:] {
+					writeEvent(w, "candle", candleToDTO(c))
+				}
+			} else {
+				io.WriteString(w, ": ping\n\n") // heartbeat keeps idle connections open
+			}
 		}
 		flusher.Flush()
 		last = cs
@@ -88,6 +99,27 @@ func (s *streamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case <-ticker.C:
 		}
 	}
+}
+
+// continues reports whether cs is an append-continuation of last: no shorter, and every
+// resident bucket keeps its Start (only the open bucket's values may change, and new
+// buckets may follow). When false the series was rebuilt and the client must re-snapshot.
+func continues(last, cs []candle.Candle) bool {
+	if len(cs) < len(last) {
+		return false
+	}
+	for i := range last {
+		if last[i].Start != cs[i].Start {
+			return false
+		}
+	}
+	return true
+}
+
+// resetEvent is the payload of an `event: reset`, signalling the client to clear its
+// candle set before applying the events that follow.
+type resetEvent struct {
+	Reset bool `json:"reset"`
 }
 
 // firstDiff returns the index of the first candle that differs between old and new (or

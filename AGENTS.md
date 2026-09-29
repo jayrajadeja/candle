@@ -52,8 +52,9 @@ passes.** Show the output; don't assert.
 - **`/v1/stream` is a diff-the-maintained-series SSE loop.** Each poll fetches the
   full-range candles and emits only the changed suffix (append-only ⇒ the updated open
   bucket plus new buckets). The streaming invariant: a client upserting events by
-  `start` equals `GET /v1/candles` full-range. Keep the loop bounded by
-  `r.Context()` and flush every write.
+  `start` equals `GET /v1/candles` full-range. A rebuild (shrink/replace) emits
+  `event: reset` so the client re-snapshots. Keep the loop bounded by `r.Context()`
+  and flush every write.
 - **Determinism.** Same input ⇒ byte-identical output (table and CSV).
 - **Minimal, surgical diffs.** Keep every safety guard; write the failing test first.
 

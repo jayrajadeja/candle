@@ -55,20 +55,33 @@ type sseReader struct {
 func newSSEReader() *sseReader { return &sseReader{byKey: map[int64]candleDTO{}} }
 
 func (s *sseReader) consume(body *bufio.Scanner) {
+	event := "message"
 	for body.Scan() {
 		line := body.Text()
-		if !strings.HasPrefix(line, "data:") {
-			continue // event:/heartbeat/blank lines
+		switch {
+		case strings.HasPrefix(line, "event:"):
+			event = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		case strings.HasPrefix(line, "data:"):
+			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			s.applyData(event, payload)
+		case line == "":
+			event = "message" // event blocks are terminated by a blank line
 		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		var dto candleDTO
-		if err := json.Unmarshal([]byte(payload), &dto); err != nil {
-			continue // e.g. an error event's payload
-		}
-		s.mu.Lock()
-		s.byKey[dto.Start] = dto
-		s.mu.Unlock()
 	}
+}
+
+func (s *sseReader) applyData(event, payload string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if event == "reset" {
+		s.byKey = map[int64]candleDTO{} // client clears and re-snapshots
+		return
+	}
+	var dto candleDTO
+	if err := json.Unmarshal([]byte(payload), &dto); err != nil {
+		return
+	}
+	s.byKey[dto.Start] = dto
 }
 
 func (s *sseReader) sorted() []candleDTO {
@@ -150,6 +163,42 @@ func TestStreamUpsertInvariant(t *testing.T) {
 	want := dtosOf(final)
 	if len(got) != len(want) {
 		t.Fatalf("upserted %d candles, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("candle %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestStreamResetsOnRebuild(t *testing.T) {
+	src := &growingSource{}
+	src.set([]candle.Candle{
+		{Start: 0, Open: 10, High: 12, Low: 9, Close: 11, Volume: 5, VWAP: 10, Trades: 3, BuyVol: 3, SellVol: 2},
+		{Start: 100, Open: 11, High: 14, Low: 11, Close: 13, Volume: 4, VWAP: 12, Trades: 2, BuyVol: 2, SellVol: 2},
+		{Start: 200, Open: 13, High: 18, Low: 12, Close: 17, Volume: 6, VWAP: 15, Trades: 3, BuyVol: 4, SellVol: 2},
+	})
+
+	srv := httptest.NewServer(newStreamHandler(src, 5*time.Millisecond))
+	defer srv.Close()
+
+	r, stop := streamAndCollect(t, srv.URL+"/v1/stream?symbol=X&width=100")
+	time.Sleep(40 * time.Millisecond) // client now holds three candles
+
+	// Rebuild to a shorter, different series (shrink) — the client must drop the
+	// stranded Start=200 candle, not keep it.
+	final := []candle.Candle{
+		{Start: 0, Open: 20, High: 22, Low: 19, Close: 21, Volume: 8, VWAP: 20, Trades: 4, BuyVol: 5, SellVol: 3},
+		{Start: 100, Open: 21, High: 24, Low: 20, Close: 23, Volume: 3, VWAP: 22, Trades: 2, BuyVol: 1, SellVol: 2},
+	}
+	src.set(final)
+	time.Sleep(40 * time.Millisecond)
+	stop()
+
+	got := r.sorted()
+	want := dtosOf(final)
+	if len(got) != len(want) {
+		t.Fatalf("after rebuild: upserted %d candles, want %d (stale candle stranded?)", len(got), len(want))
 	}
 	for i := range want {
 		if got[i] != want[i] {

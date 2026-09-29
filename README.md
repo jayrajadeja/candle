@@ -104,7 +104,9 @@ data: {"start":250,"open":104,"high":109,...}
 **Streaming invariant.** A client that upserts each event by `start` holds, at any
 moment, exactly what `GET /v1/candles` (full range) would return. Because ticks are
 append-only, each poll emits only the changed suffix — the updated open bucket plus
-any newly finalized buckets. The server polls its source every 250 ms.
+any newly finalized buckets. If the underlying log is ever rebuilt (shrunk or
+replaced), the server sends an `event: reset` telling the client to clear and
+re-snapshot from the events that follow. The server polls its source every 250 ms.
 
 `serve` keeps each symbol's parsed ticks hot in a resident, read-only source and
 aggregates *incrementally*: on append it reads only the new bytes past the old file
