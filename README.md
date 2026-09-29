@@ -77,9 +77,34 @@ Endpoints:
 |--------|------|---------|
 | `GET` | `/healthz` | liveness — plain `ok` |
 | `GET` | `/v1/candles?symbol=&width=&from=&to=` | OHLCV candles as JSON |
+| `GET` | `/v1/stream?symbol=&width=` | live candles over Server-Sent Events |
 
 `symbol` and `width` (> 0) are required; `from`/`to` are inclusive logical-TS bounds
 and default to the full range. An unknown symbol returns an empty `candles` array.
+
+### Live stream (SSE)
+
+`/v1/stream` pushes candles as the log grows, instead of forcing the client to poll
+`/v1/candles`. On connect it emits the current full-range series, then one
+`event: candle` per candle that appears or changes (`:` comment lines are idle
+heartbeats):
+
+```bash
+curl -N 'localhost:8138/v1/stream?symbol=SYNTH&width=250'
+```
+```
+event: candle
+data: {"start":0,"open":100,"high":104,...}
+
+: ping
+event: candle
+data: {"start":250,"open":104,"high":109,...}
+```
+
+**Streaming invariant.** A client that upserts each event by `start` holds, at any
+moment, exactly what `GET /v1/candles` (full range) would return. Because ticks are
+append-only, each poll emits only the changed suffix — the updated open bucket plus
+any newly finalized buckets. The server polls its source every 250 ms.
 
 `serve` keeps each symbol's parsed ticks hot in a resident, read-only source and
 aggregates *incrementally*: on append it reads only the new bytes past the old file
@@ -122,7 +147,7 @@ With no `from`/`to`, that is exactly `candle --width W --log X.log`.
 | `candle/` | `Aggregate` and the resumable `Aggregator` — ticks → OHLCV+VWAP+buy/sell candles (pure) |
 | `feed/`   | frame a 25-byte record stream (or a `.log` with header) into ticks |
 | `logsource/` | read `dir/SYMBOL.log`, TS-filter, aggregate — `LogSource` (stateless), `Cache` (resident, full re-read), and `IncrementalCache` (`NewIncremental`, resident + delta read + maintained candles), the `serve` data source |
-| `server/` | transport-only HTTP/JSON handler over a `candle.Source` |
+| `server/` | transport-only HTTP/JSON handler over a `candle.Source`; `/v1/candles` (read) and `/v1/stream` (SSE live tail) |
 | `cmd/candle/` | table/CSV rendering, `serve` subcommand, file/stdin plumbing — the I/O layer |
 
 ```bash
