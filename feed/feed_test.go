@@ -73,3 +73,30 @@ func TestReadTicksBadHeaderErrors(t *testing.T) {
 		t.Fatal("want bad-header error, got nil")
 	}
 }
+
+// partialTail builds header + 3 full records + 10 trailing bytes (less than one
+// record), simulating a bufio flush that split tickstore's 25-byte record.
+func partialTail() []byte {
+	in := append([]byte{}, header()...)
+	for i := int64(1); i <= 3; i++ {
+		in = append(in, rec(tick.Tick{TS: i, Price: 10 * i, Qty: 1, Side: tick.Buy})...)
+	}
+	return append(in, make([]byte, 10)...)
+}
+
+func TestReadCompleteTicks_IgnoresTrailingPartial(t *testing.T) {
+	got, err := ReadCompleteTicks(bytes.NewReader(partialTail()), true)
+	if err != nil {
+		t.Fatalf("ReadCompleteTicks: %v", err)
+	}
+	if len(got) != 3 || got[0].TS != 1 || got[2].TS != 3 {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestReadTicks_StillStrict(t *testing.T) {
+	_, err := ReadTicks(bytes.NewReader(partialTail()), true)
+	if err == nil || err.Error() != "truncated stream: trailing partial record" {
+		t.Fatalf("want truncated-stream error, got %v", err)
+	}
+}

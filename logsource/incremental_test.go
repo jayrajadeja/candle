@@ -181,6 +181,46 @@ func TestIncrementalConcurrentReadsMatchLogSource(t *testing.T) {
 	}
 }
 
+// A trailing partial record (a bufio flush that split a record across two
+// writes) must be tolerated by the serve path: complete records are served and
+// the partial tail is ignored, not surfaced as an error. The next load, after
+// the tail is completed and one more record appended, must see all records
+// with no duplicates or gaps.
+func TestIncrementalTrailingPartialRecordTolerated(t *testing.T) {
+	dir := t.TempDir()
+	full := strictTicks(5, 0) // N=5
+	writeLog(t, dir, "SYNTH", full)
+
+	next := tick.Tick{TS: 5, Price: 105, Qty: 2, Side: tick.Buy}
+	nextBytes := recordBytes(next)
+	appendRaw(t, dir, "SYNTH", nextBytes[:10]) // partial tail: 10 of 25 bytes
+
+	c := NewIncremental(dir)
+	got, err := c.Candles("SYNTH", 1, minInt64, maxInt64)
+	if err != nil {
+		t.Fatalf("partial tail: unexpected error %v", err)
+	}
+	if len(got) != len(full) || totalVolume(got) != totalQty(full) {
+		t.Fatalf("partial tail: want %d candles vol %d, got %d candles vol %d",
+			len(full), totalQty(full), len(got), totalVolume(got))
+	}
+
+	// Complete the partial record, then append one more full record.
+	appendRaw(t, dir, "SYNTH", nextBytes[10:])
+	more := tick.Tick{TS: 6, Price: 106, Qty: 3, Side: tick.Sell}
+	appendRaw(t, dir, "SYNTH", recordBytes(more))
+
+	want := append(append([]tick.Tick{}, full...), next, more)
+	got2, err := c.Candles("SYNTH", 1, minInt64, maxInt64)
+	if err != nil {
+		t.Fatalf("after completion: unexpected error %v", err)
+	}
+	if len(got2) != len(want) || totalVolume(got2) != totalQty(want) {
+		t.Fatalf("after completion: want %d candles vol %d (no dup/skip), got %d candles vol %d",
+			len(want), totalQty(want), len(got2), totalVolume(got2))
+	}
+}
+
 // A writer appending while readers query must not corrupt the delta offset: after the
 // writes settle, the resident state must still match a cold LogSource over the file
 // (no duplicated or dropped boundary records).

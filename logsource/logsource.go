@@ -40,7 +40,7 @@ func (ls *LogSource) Candles(symbol string, width, from, to int64) ([]candle.Can
 	}
 	defer f.Close()
 
-	all, err := feed.ReadTicks(f, true)
+	all, err := feed.ReadCompleteTicks(f, true)
 	if err != nil {
 		return nil, err
 	}
