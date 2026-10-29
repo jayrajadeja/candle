@@ -33,6 +33,60 @@ func writeLog(tb testing.TB, dir, symbol string, ticks []tick.Tick) {
 	}
 }
 
+// recordBytes encodes one tick as a raw 25-byte record (no header), matching
+// writeLog's record encoding.
+func recordBytes(tk tick.Tick) []byte {
+	var b [tick.RecordSize]byte
+	binary.LittleEndian.PutUint64(b[0:8], uint64(tk.TS))
+	binary.LittleEndian.PutUint64(b[8:16], uint64(tk.Price))
+	binary.LittleEndian.PutUint64(b[16:24], tk.Qty)
+	b[24] = byte(tk.Side)
+	return b[:]
+}
+
+// appendRaw appends arbitrary bytes (e.g. a partial record) to an existing log
+// file, simulating a bufio flush that split a record across two writes.
+func appendRaw(tb testing.TB, dir, symbol string, b []byte) {
+	tb.Helper()
+	f, err := os.OpenFile(filepath.Join(dir, symbol+".log"), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		tb.Fatalf("appendRaw open: %v", err)
+	}
+	defer f.Close()
+	if _, err := f.Write(b); err != nil {
+		tb.Fatalf("appendRaw write: %v", err)
+	}
+}
+
+// strictTicks returns n ticks with strictly increasing TS starting at from, so
+// each tick lands in its own width-1 candle: an exact per-tick count/volume
+// check for the partial-tail tests.
+func strictTicks(n int, from int64) []tick.Tick {
+	out := make([]tick.Tick, n)
+	for i := 0; i < n; i++ {
+		out[i] = tick.Tick{TS: from + int64(i), Price: 100 + int64(i), Qty: uint64(i%5) + 1, Side: tick.Side(i % 2)}
+	}
+	return out
+}
+
+// totalVolume sums candle Volume across cs.
+func totalVolume(cs []candle.Candle) uint64 {
+	var sum uint64
+	for _, c := range cs {
+		sum += c.Volume
+	}
+	return sum
+}
+
+// totalQty sums tick Qty across ticks.
+func totalQty(ticks []tick.Tick) uint64 {
+	var sum uint64
+	for _, tk := range ticks {
+		sum += tk.Qty
+	}
+	return sum
+}
+
 func seedTicks(n int) []tick.Tick {
 	out := make([]tick.Tick, n)
 	ts := int64(0)

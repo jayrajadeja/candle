@@ -234,7 +234,7 @@ func readAll(path string) ([]tick.Tick, error) {
 		return nil, err
 	}
 	defer f.Close()
-	return feed.ReadTicks(f, true)
+	return feed.ReadCompleteTicks(f, true)
 }
 
 // readDelta frames the records appended past offset. The header lives only at offset 0
@@ -248,7 +248,7 @@ func readDelta(path string, offset int64) ([]tick.Tick, error) {
 	if _, err := f.Seek(offset, 0); err != nil {
 		return nil, err
 	}
-	return feed.ReadTicks(f, false)
+	return feed.ReadCompleteTicks(f, false)
 }
 
 // windowAligned reports whether [from, to] has no partial boundary buckets at width:

@@ -135,7 +135,7 @@ func (c *Cache) load(symbol, path string) ([]tick.Tick, error) {
 	if err != nil {
 		return nil, err
 	}
-	ticks, err := feed.ReadTicks(f, true)
+	ticks, err := feed.ReadCompleteTicks(f, true)
 	if err != nil {
 		return nil, err
 	}

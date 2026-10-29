@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jayrajadeja/candle/candle"
+	"github.com/jayrajadeja/candle/tick"
 )
 
 const (
@@ -97,6 +98,44 @@ func TestCacheInvalidatesOnRewrite(t *testing.T) {
 	}
 	if candlesEqual(first, second) {
 		t.Fatalf("cache did not reflect rewritten data")
+	}
+}
+
+// A trailing partial record must be tolerated (served as "not yet written"),
+// and growing the file past the completed tail must invalidate the cached
+// entry so the next load sees every record, with no duplicates or gaps.
+func TestCacheTrailingPartialRecordTolerated(t *testing.T) {
+	dir := t.TempDir()
+	full := strictTicks(5, 0) // N=5
+	writeLog(t, dir, "SYNTH", full)
+
+	next := tick.Tick{TS: 5, Price: 105, Qty: 2, Side: tick.Buy}
+	nextBytes := recordBytes(next)
+	appendRaw(t, dir, "SYNTH", nextBytes[:10]) // partial tail: 10 of 25 bytes
+
+	c := NewCached(dir)
+	got, err := c.Candles("SYNTH", 1, minTS, maxTS)
+	if err != nil {
+		t.Fatalf("partial tail: unexpected error %v", err)
+	}
+	if len(got) != len(full) || totalVolume(got) != totalQty(full) {
+		t.Fatalf("partial tail: want %d candles vol %d, got %d candles vol %d",
+			len(full), totalQty(full), len(got), totalVolume(got))
+	}
+
+	// Complete the partial record, then append one more full record.
+	appendRaw(t, dir, "SYNTH", nextBytes[10:])
+	more := tick.Tick{TS: 6, Price: 106, Qty: 3, Side: tick.Sell}
+	appendRaw(t, dir, "SYNTH", recordBytes(more))
+
+	want := append(append([]tick.Tick{}, full...), next, more)
+	got2, err := c.Candles("SYNTH", 1, minTS, maxTS)
+	if err != nil {
+		t.Fatalf("after completion: unexpected error %v", err)
+	}
+	if len(got2) != len(want) || totalVolume(got2) != totalQty(want) {
+		t.Fatalf("after completion: want %d candles vol %d (no dup/skip), got %d candles vol %d",
+			len(want), totalQty(want), len(got2), totalVolume(got2))
 	}
 }
 

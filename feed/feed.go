@@ -14,8 +14,25 @@ import (
 
 // ReadTicks reads r to EOF, decoding consecutive fixed-width tick records. In log
 // mode it first strips and validates tickstore's 8-byte log header. A trailing
-// partial record is an error (the stream is truncated).
+// partial record is an error (the stream is truncated). Used by the candle CLI
+// (stdin and --log), which reads a closed/finite stream and must stay strict.
 func ReadTicks(r io.Reader, logMode bool) ([]tick.Tick, error) {
+	return readTicks(r, logMode, false)
+}
+
+// ReadCompleteTicks is like ReadTicks but, on a trailing partial record, returns
+// the complete ticks read so far with a nil error instead of an error — the
+// partial tail is treated as "not written yet". Used by logsource, which polls a
+// live, actively growing log where a bufio flush can split a record across two
+// writes; the next poll picks the record up once it is complete.
+func ReadCompleteTicks(r io.Reader, logMode bool) ([]tick.Tick, error) {
+	return readTicks(r, logMode, true)
+}
+
+// readTicks is the shared framing loop. tolerateTail controls what happens on a
+// trailing partial record: strict error (false) or return what was read so far
+// (true).
+func readTicks(r io.Reader, logMode, tolerateTail bool) ([]tick.Tick, error) {
 	br := bufio.NewReader(r)
 	if logMode {
 		var h [tick.HeaderSize]byte
@@ -34,6 +51,9 @@ func ReadTicks(r io.Reader, logMode bool) ([]tick.Tick, error) {
 			return out, nil
 		}
 		if errors.Is(err, io.ErrUnexpectedEOF) {
+			if tolerateTail {
+				return out, nil
+			}
 			return nil, errors.New("truncated stream: trailing partial record")
 		}
 		if err != nil {
